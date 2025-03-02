@@ -1,0 +1,56 @@
+name: Semgrep PR Security Scan
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  semgrep-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Fetch PR content
+        run: |
+          gh pr view ${{ github.event.pull_request.number }} --json files -q '.files[].path' > pr_files.txt
+          while read file; do
+            echo -e "\n\n// File: $file" >> pr_code_to_scan.txt
+            cat "$file" >> pr_code_to_scan.txt
+          done < pr_files.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Semgrep CLI scan
+        run: semgrep scan --config=auto pr_code_to_scan.txt --json > semgrep_results.json
+
+      - name: Post PR Comment with Results
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('semgrep_results.json', 'utf8'));
+            let comment = "## 🛡️ Semgrep Security Scan Report\n\n";
+
+            if (results.results.length === 0) {
+              comment += "✅ No security issues found!";
+            } else {
+              comment += "⚠️ **Security issues detected:**\n\n";
+              results.results.forEach(issue => {
+                comment += `- **${issue.check_id}** (${issue.path}, line ${issue.start.line}): ${issue.extra.message}\n`;
+              });
+            }
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });

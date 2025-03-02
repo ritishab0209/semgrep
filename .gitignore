@@ -1,0 +1,3 @@
+# Ignore log files and scan results
+semgrep_results.json
+pr_code_to_scan.txt
